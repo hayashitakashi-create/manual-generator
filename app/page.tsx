@@ -98,21 +98,21 @@ export default function Home() {
   const markdownComponents: Components = useMemo(
     () => ({
       img: ({ src, alt, ...props }) => {
-        if (!src) return null;
-        const resolved = resolveImageSrc(src);
+        const srcStr = typeof src === 'string' ? src : '';
+        if (!srcStr) return null;
+        const resolved = resolveImageSrc(srcStr);
         if (resolved) {
           return (
             <img
               src={resolved}
-              alt={alt || ''}
+              alt={typeof alt === 'string' ? alt : ''}
               style={{ maxWidth: '100%', height: 'auto', margin: '16px 0', borderRadius: '4px', border: '1px solid #e5e7eb' }}
-              {...props}
             />
           );
         }
         return (
           <div style={{ padding: '24px', background: '#fef2f2', border: '1px dashed #fca5a5', borderRadius: '8px', textAlign: 'center', margin: '16px 0', color: '#dc2626', fontSize: '14px' }}>
-            画像未対応: {src.split('/').pop()}
+            画像未対応: {srcStr.split('/').pop()}
           </div>
         );
       },
