@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { FileText, Image, Sparkles, Check, Download, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -68,41 +68,136 @@ export default function Home() {
     return map;
   }, [screenshots]);
 
-  // 画像パスからファイル名を抽出して、対応するdataUrlを返す
-  const resolveImageSrc = useCallback(
-    (src: string): string | null => {
-      const fileName = src.split('/').pop();
-      if (!fileName) return null;
-      return imageMap.get(fileName) || null;
-    },
-    [imageMap]
-  );
+  // MDに画像参照が含まれているか判定
+  const mdHasImageRefs = useMemo(() => {
+    return /!\[.*?\]\(.*?\)/.test(markdownContent);
+  }, [markdownContent]);
 
-  // ReactMarkdownのカスタムコンポーネント
-  const markdownComponents: Components = useMemo(
-    () => ({
-      img: ({ src, alt }) => {
-        const srcStr = typeof src === 'string' ? src : '';
-        if (!srcStr) return null;
-        const resolved = resolveImageSrc(srcStr);
-        if (resolved) {
-          return (
-            <img
-              src={resolved}
-              alt={typeof alt === 'string' ? alt : ''}
-              style={{ maxWidth: '100%', height: 'auto', margin: '16px 0', borderRadius: '4px', border: '1px solid #e5e7eb' }}
-            />
-          );
+  // MDのセクション番号とスクショファイル名をマッチングして自動挿入
+  const processedMarkdown = useMemo(() => {
+    // 既に画像参照がある場合、またはスクショがない場合はそのまま返す
+    if (mdHasImageRefs || screenshots.length === 0 || !markdownContent) {
+      return markdownContent;
+    }
+
+    const lines = markdownContent.split('\n');
+
+    // h2/h3セクションの位置とキーを検出
+    // ## 1. xxx → key "1", ### 2-1. xxx → key "2.1", ### 2.2 xxx → key "2.2"
+    const sections: { lineIndex: number; key: string; level: number }[] = [];
+    lines.forEach((line, index) => {
+      const h2Match = line.match(/^## (\d+)\.\s/);
+      const h3Match = line.match(/^### (\d+)[-.](\d+)/);
+      if (h2Match) {
+        sections.push({ lineIndex: index, key: h2Match[1], level: 2 });
+      } else if (h3Match) {
+        sections.push({
+          lineIndex: index,
+          key: `${parseInt(h3Match[1])}.${parseInt(h3Match[2])}`,
+          level: 3,
+        });
+      }
+    });
+
+    if (sections.length === 0) return markdownContent;
+
+    // スクリーンショットから番号を抽出してグループ化
+    // ファイル名例: 02-01_login.png → key "2.1", 03-02_filter.png → key "3.2"
+    //              05_top.png → key "5", mobile_01_login.png → unmatched
+    const screenshotsByKey = new Map<string, ImageFile[]>();
+    const unmatchedScreenshots: ImageFile[] = [];
+
+    const sortedScreenshots = [...screenshots].sort((a, b) =>
+      a.name.localeCompare(b.name, 'ja', { numeric: true })
+    );
+
+    sortedScreenshots.forEach((img) => {
+      const match = img.name.match(/^0*(\d+)[-_.](?:0*(\d+)[-_.])?/);
+      if (match) {
+        const major = parseInt(match[1]).toString();
+        const minor = match[2] ? parseInt(match[2]).toString() : null;
+        const exactKey = minor ? `${major}.${minor}` : null;
+
+        // 完全マッチ (major.minor) → h3セクション優先
+        if (exactKey && sections.find(s => s.key === exactKey)) {
+          if (!screenshotsByKey.has(exactKey)) screenshotsByKey.set(exactKey, []);
+          screenshotsByKey.get(exactKey)!.push(img);
         }
+        // メジャー番号のみ → h2セクションにマッチ
+        else if (sections.find(s => s.key === major)) {
+          if (!screenshotsByKey.has(major)) screenshotsByKey.set(major, []);
+          screenshotsByKey.get(major)!.push(img);
+        }
+        else {
+          unmatchedScreenshots.push(img);
+        }
+      } else {
+        unmatchedScreenshots.push(img);
+      }
+    });
+
+    // セクション末尾に画像を挿入（後ろから処理して行番号がずれないように）
+    const result = [...lines];
+
+    for (let i = sections.length - 1; i >= 0; i--) {
+      const section = sections[i];
+      const matched = screenshotsByKey.get(section.key);
+      if (!matched || matched.length === 0) continue;
+
+      // 次のセクションの直前（---の前）に挿入
+      let insertAt: number;
+      if (i + 1 < sections.length) {
+        insertAt = sections[i + 1].lineIndex;
+        for (let j = insertAt - 1; j > section.lineIndex; j--) {
+          if (result[j]?.trim() === '---') {
+            insertAt = j;
+            break;
+          }
+        }
+      } else {
+        insertAt = result.length;
+      }
+
+      const imageLines = matched.map(img => `\n![${img.name}](${img.name})\n`);
+      result.splice(insertAt, 0, ...imageLines);
+    }
+
+    // マッチしなかったスクショは末尾に追加
+    if (unmatchedScreenshots.length > 0) {
+      result.push('\n---\n');
+      result.push('## 参考スクリーンショット\n');
+      unmatchedScreenshots.forEach(img => {
+        result.push(`\n![${img.name}](${img.name})\n`);
+      });
+    }
+
+    return result.join('\n');
+  }, [markdownContent, screenshots, mdHasImageRefs]);
+
+  // ReactMarkdownのカスタムコンポーネント（画像解決）
+  const markdownComponents: Components = {
+    img: ({ src, alt }) => {
+      const srcStr = typeof src === 'string' ? src : '';
+      if (!srcStr) return null;
+      // ファイル名を抽出して imageMap から検索
+      const fileName = srcStr.split('/').pop() || '';
+      const resolved = imageMap.get(fileName) || null;
+      if (resolved) {
         return (
-          <div style={{ padding: '24px', background: '#fef2f2', border: '1px dashed #fca5a5', borderRadius: '8px', textAlign: 'center', margin: '16px 0', color: '#dc2626', fontSize: '14px' }}>
-            画像未対応: {srcStr.split('/').pop()}
-          </div>
+          <img
+            src={resolved}
+            alt={typeof alt === 'string' ? alt : ''}
+            style={{ maxWidth: '100%', height: 'auto', margin: '16px 0', borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}
+          />
         );
-      },
-    }),
-    [resolveImageSrc]
-  );
+      }
+      return (
+        <div style={{ padding: '24px', background: '#fef2f2', border: '1px dashed #fca5a5', borderRadius: '8px', textAlign: 'center', margin: '16px 0', color: '#dc2626', fontSize: '14px' }}>
+          画像未対応: {fileName}
+        </div>
+      );
+    },
+  };
 
   // PDF生成（大項目ごとにページ分割 + ヘッダーロゴ + ページ番号）
   const generatePDF = async () => {
@@ -124,30 +219,75 @@ export default function Home() {
       return;
     }
 
-    // プレビューのHTMLを取得して、h2ごとにセクション分割
+    // プレビューのHTMLを取得して、セクション分割
+    // 参考PDFのように: タイトル → 説明文 → スクリーンショット が1ページに収まるよう分割
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = previewEl.innerHTML;
 
-    const sections: string[] = [];
-    let currentSection = '';
-
+    // ノードをフラットに収集（h1, h2, h3, p, ul, ol, img, etc.）
+    const nodes: { tag: string; html: string; isImage: boolean }[] = [];
     Array.from(tempDiv.childNodes).forEach((node) => {
       const el = node as HTMLElement;
-      if (el.tagName === 'H2') {
-        if (currentSection.trim()) {
-          sections.push(currentSection);
-        }
-        currentSection = el.outerHTML || '';
-      } else if (el.tagName === 'HR') {
-        // hrは無視
-      } else {
-        if (el.outerHTML) {
-          currentSection += el.outerHTML;
-        } else if (el.textContent?.trim()) {
-          currentSection += el.textContent;
-        }
+      if (el.tagName === 'HR') return; // hrは無視
+      if (el.outerHTML) {
+        nodes.push({ tag: el.tagName || '', html: el.outerHTML, isImage: el.tagName === 'IMG' });
+      } else if (el.textContent?.trim()) {
+        nodes.push({ tag: '', html: el.textContent || '', isImage: false });
       }
     });
+
+    // ページコンテンツ推定高さ（A4: 297mm - padding 35mm - header 50px - footer 30px ≒ 880px相当）
+    const MAX_PAGE_HEIGHT = 880;
+
+    const estimateHeight = (node: { tag: string; html: string; isImage: boolean }): number => {
+      if (node.isImage) return 400; // スクリーンショットの推定高さ
+      if (node.tag === 'H1') return 50;
+      if (node.tag === 'H2') return 45;
+      if (node.tag === 'H3') return 35;
+      if (node.tag === 'P') {
+        const textLen = node.html.replace(/<[^>]*>/g, '').length;
+        return Math.max(25, Math.ceil(textLen / 60) * 20);
+      }
+      if (node.tag === 'UL' || node.tag === 'OL') {
+        const items = (node.html.match(/<li/g) || []).length;
+        return Math.max(30, items * 22);
+      }
+      return 25;
+    };
+
+    // セクション分割: H2で新ページ開始 + 高さが超過したら新ページへ
+    const sections: string[] = [];
+    let currentSection = '';
+    let currentHeight = 0;
+
+    nodes.forEach((node, idx) => {
+      const nodeHeight = estimateHeight(node);
+
+      // H2は常に新ページ開始（最初のH1/H2を除く）
+      if (node.tag === 'H2' && currentSection.trim()) {
+        sections.push(currentSection);
+        currentSection = node.html;
+        currentHeight = nodeHeight;
+        return;
+      }
+
+      // 現在のページに収まらない場合、新ページへ
+      // ただしテキスト要素だけの場合は見出しと一緒にする
+      if (currentHeight + nodeHeight > MAX_PAGE_HEIGHT && currentSection.trim()) {
+        // 画像がはみ出す場合：直前のテキストまでで1ページにして、画像は次ページへ
+        // 見出しだけが残る場合は分割しない
+        const isOnlyHeading = /^<h[1-4][^>]*>[\s\S]*<\/h[1-4]>$/i.test(currentSection.trim());
+        if (!isOnlyHeading) {
+          sections.push(currentSection);
+          currentSection = '';
+          currentHeight = 0;
+        }
+      }
+
+      currentSection += node.html;
+      currentHeight += nodeHeight;
+    });
+
     if (currentSection.trim()) {
       sections.push(currentSection);
     }
@@ -194,53 +334,68 @@ export default function Home() {
           .page-section {
             width: 210mm;
             min-height: 297mm;
-            padding: 20mm 25mm 25mm 25mm;
+            padding: 15mm 20mm 20mm 20mm;
             page-break-after: always;
             position: relative;
             box-sizing: border-box;
+            overflow: hidden;
           }
           .page-section:last-child { page-break-after: auto; }
           .page-header {
             display: flex;
             justify-content: flex-end;
             align-items: center;
-            padding-bottom: 12px;
-            margin-bottom: 16px;
+            padding-bottom: 8px;
+            margin-bottom: 12px;
             border-bottom: 2px solid #e5e7eb;
-            min-height: 40px;
+            min-height: 36px;
           }
           .header-logo {
-            height: 32px;
+            height: 28px;
             width: auto;
             border: none !important;
             margin: 0 !important;
             border-radius: 0 !important;
+            max-height: 28px !important;
           }
-          .page-body { min-height: calc(297mm - 20mm - 25mm - 60px - 40px); }
+          .page-body { }
           .page-footer {
             position: absolute;
-            bottom: 20mm;
-            right: 25mm;
+            bottom: 15mm;
+            right: 20mm;
             text-align: right;
           }
-          .page-number { font-size: 11px; color: #9ca3af; }
-          h1 { font-size: 26px; font-weight: bold; margin: 0 0 16px; padding-bottom: 10px; border-bottom: 3px solid #2563eb; color: #1e40af; }
-          h2 { font-size: 21px; font-weight: bold; margin: 0 0 14px; padding-bottom: 8px; border-bottom: 2px solid #93c5fd; color: #1e40af; }
-          h3 { font-size: 17px; font-weight: bold; margin: 18px 0 8px; color: #1e3a5f; }
-          h4 { font-size: 15px; font-weight: bold; margin: 14px 0 6px; color: #374151; }
-          p { margin: 6px 0; font-size: 13px; }
-          ul, ol { margin: 6px 0; padding-left: 22px; font-size: 13px; }
-          li { margin: 3px 0; }
-          img { max-width: 100%; height: auto; margin: 12px 0; border: 1px solid #d1d5db; border-radius: 4px; }
+          .page-number { font-size: 10px; color: #9ca3af; }
+          h1 { font-size: 24px; font-weight: bold; margin: 0 0 14px; padding-bottom: 8px; border-bottom: 3px solid #2563eb; color: #1e40af; }
+          h2 { font-size: 20px; font-weight: bold; margin: 0 0 10px; padding-bottom: 6px; border-bottom: 2px solid #93c5fd; color: #1e40af; }
+          h3 { font-size: 16px; font-weight: bold; margin: 14px 0 6px; color: #1e3a5f; }
+          h4 { font-size: 14px; font-weight: bold; margin: 10px 0 4px; color: #374151; }
+          p { margin: 4px 0; font-size: 12.5px; }
+          ul, ol { margin: 4px 0; padding-left: 20px; font-size: 12.5px; }
+          li { margin: 2px 0; }
+          img {
+            display: block;
+            max-width: 90%;
+            max-height: 180mm;
+            width: auto;
+            height: auto;
+            margin: 10px auto;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            object-fit: contain;
+          }
           hr { display: none; }
           strong { font-weight: bold; color: #1e3a5f; }
           a { color: #2563eb; text-decoration: underline; }
-          code { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+          code { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 11px; }
           @media print {
             .page-section { page-break-after: always; }
             .page-section:last-child { page-break-after: auto; }
             h2, h3 { page-break-after: avoid; }
-            img { page-break-inside: avoid; }
+            img {
+              page-break-inside: avoid;
+              page-break-before: auto;
+            }
           }
           @media screen {
             body { background: #f0f0f0; }
@@ -286,7 +441,7 @@ export default function Home() {
     }
   };
 
-  const isValid = mdFile !== null && screenshots.length > 0;
+  const isValid = mdFile !== null;
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return bytes + ' B';
@@ -312,7 +467,7 @@ export default function Home() {
       title: 'スクリーンショット',
       description: '説明用の画像ファイル（複数可）',
       icon: Image,
-      required: true,
+      required: false,
       completed: screenshots.length > 0,
       files: screenshots,
       accept: 'image/*',
@@ -503,10 +658,11 @@ export default function Home() {
               className="prose max-w-none p-6 rounded-2xl bg-white shadow-[inset_4px_4px_8px_#d1d5db,inset_-4px_-4px_8px_#ffffff] max-h-[60vh] overflow-y-auto"
             >
               <ReactMarkdown
+                key={`md-${screenshots.length}-${logo?.name || 'none'}`}
                 remarkPlugins={[remarkGfm]}
                 components={markdownComponents}
               >
-                {markdownContent}
+                {processedMarkdown}
               </ReactMarkdown>
             </div>
           </motion.div>

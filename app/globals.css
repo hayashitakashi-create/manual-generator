@@ -23,5 +23,152 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, Arial, Helvetica, sans-serif;
+}
+
+/* プレビュー内のテーブルスタイル */
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  font-size: 14px;
+}
+
+.prose thead {
+  background: #f3f4f6;
+}
+
+.prose th,
+.prose td {
+  border: 1px solid #d1d5db;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.prose th {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.prose tr:nth-child(even) {
+  background: #f9fafb;
+}
+
+/* コードブロック */
+.prose pre {
+  background: #1f2937;
+  color: #e5e7eb;
+  border-radius: 8px;
+  padding: 16px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.prose pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font-family: "SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", monospace;
+  white-space: pre;
+}
+
+.prose code {
+  background: #f3f4f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: "SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", monospace;
+}
+
+/* ブロッククォート */
+.prose blockquote {
+  border-left: 4px solid #3b82f6;
+  background: #eff6ff;
+  padding: 12px 16px;
+  margin: 16px 0;
+  border-radius: 0 8px 8px 0;
+  color: #1e40af;
+}
+
+.prose blockquote p {
+  margin: 4px 0;
+}
+
+/* リスト */
+.prose ul,
+.prose ol {
+  padding-left: 24px;
+  margin: 8px 0;
+}
+
+.prose li {
+  margin: 4px 0;
+}
+
+/* 見出し */
+.prose h1 {
+  font-size: 1.75rem;
+  border-bottom: 3px solid #2563eb;
+  padding-bottom: 8px;
+  color: #1e40af;
+}
+
+.prose h2 {
+  font-size: 1.4rem;
+  border-bottom: 2px solid #93c5fd;
+  padding-bottom: 6px;
+  color: #1e40af;
+  margin-top: 32px;
+}
+
+.prose h3 {
+  font-size: 1.15rem;
+  color: #1e3a5f;
+  margin-top: 24px;
+}
+
+.prose h4 {
+  font-size: 1rem;
+  color: #374151;
+  margin-top: 16px;
+}
+
+/* 水平線 */
+.prose hr {
+  border: none;
+  border-top: 2px solid #e5e7eb;
+  margin: 24px 0;
+}
+
+/* スクリーンショットギャラリー */
+.screenshot-gallery {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 2px dashed #d1d5db;
+}
+
+.screenshot-gallery h3 {
+  font-size: 1.1rem;
+  color: #1e3a5f;
+  margin-bottom: 16px;
+}
+
+.screenshot-gallery .screenshot-item {
+  margin-bottom: 24px;
+}
+
+.screenshot-gallery .screenshot-item img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.screenshot-gallery .screenshot-item p {
+  font-size: 13px;
+  color: #6b7280;
+  margin-top: 4px;
+  text-align: center;
 }
